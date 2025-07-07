@@ -32,8 +32,7 @@ logger = logging.getLogger(__name__)
 
 async def _tool_requires_openwebui_auth(session, endpoint_name: str, form_data: Any) -> bool:
     """
-    Determine if a tool requires authentication by checking for auth_token parameter
-    in the tool schema.
+    Determine if a tool requires authentication by checking for an @auth_token string within the tool description.
     """
 
     try:
