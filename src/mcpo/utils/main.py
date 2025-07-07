@@ -2,7 +2,7 @@ import json
 import traceback
 from typing import Any, Dict, ForwardRef, List, Optional, Type, Union
 import logging
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 
 from mcp import ClientSession, types
 from mcp.types import (
@@ -28,6 +28,24 @@ MCP_ERROR_TO_HTTP_STATUS = {
 }
 
 logger = logging.getLogger(__name__)
+
+
+async def _tool_requires_openwebui_auth(session, endpoint_name: str, form_data: Any) -> bool:
+    """
+    Determine if a tool requires authentication by checking for an @auth_token string within the tool description.
+    """
+
+    try:
+        tools_result = await session.list_tools()
+        for tool in tools_result.tools:
+            if tool.name == endpoint_name and tool.description:
+                description = tool.description.lower()
+                if "@requires_openwebui_auth" in description:
+                    return True
+    except Exception:
+        pass
+    
+    return False
 
 
 def process_tool_response(result: CallToolResult) -> list:
@@ -276,9 +294,15 @@ def get_tool_handler(
         def make_endpoint_func(
             endpoint_name: str, FormModel, session: ClientSession
         ):  # Parameterized endpoint
-            async def tool(form_data: FormModel) -> Union[ResponseModel, Any]:
+            async def tool(form_data: FormModel, request: Request) -> Union[ResponseModel, Any]:
                 args = form_data.model_dump(exclude_none=True, by_alias=True)
                 logger.info(f"Calling endpoint: {endpoint_name}, with args: {args}")
+
+                # Automatically inject auth token for tools that need it
+                if await _tool_requires_openwebui_auth(session, endpoint_name, form_data):
+                    args['auth_token'] = request.headers.get('authorization', None)
+                    logger.debug(f"🔐 Injected raw auth header for tool: {endpoint_name}")
+
                 try:
                     result = await session.call_tool(endpoint_name, arguments=args)
 
