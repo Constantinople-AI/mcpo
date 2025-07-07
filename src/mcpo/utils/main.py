@@ -35,13 +35,7 @@ async def _tool_requires_openwebui_auth(session, endpoint_name: str, form_data: 
     Determine if a tool requires authentication by checking for auth_token parameter
     in the tool schema.
     """
-    # Method 1: Check if tool has auth_token parameter
-    if hasattr(form_data, '__fields__'):
-        field_names = [field.lower() for field in form_data.__fields__.keys()]
-        if 'auth_token' in field_names:
-            return True
-    
-    # Method 2: Check tool description for @requires_auth marker
+
     try:
         tools_result = await session.list_tools()
         for tool in tools_result.tools:
