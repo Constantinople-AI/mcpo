@@ -303,20 +303,12 @@ def get_tool_handler(
         ):  # Parameterized endpoint
             async def tool(form_data: FormModel, request: Request) -> Union[ResponseModel, Any]:
                 args = form_data.model_dump(exclude_none=True, by_alias=True)
-                print(f"Calling endpoint: {endpoint_name}, with args: {args}")
+                logger.info(f"Calling endpoint: {endpoint_name}, with args: {args}")
 
                 # Automatically inject auth token for tools that need it
                 if await _tool_requires_openwebui_auth(session, endpoint_name, form_data):
-                    if 'authorization' in request.headers:
-                        auth_header = request.headers['authorization']
-                        # Extract Bearer token (remove "Bearer " prefix)
-                        if auth_header.startswith('Bearer '):
-                            auth_token = auth_header[7:]  # Remove "Bearer " prefix
-                            args['auth_token'] = auth_token
-                            print(f"🔐 Injected auth_token for tool: {endpoint_name}")
-                        else:
-                            args['auth_token'] = auth_header
-                            print(f"🔐 Injected raw auth header for tool: {endpoint_name}")
+                    args['auth_token'] = request.headers.get('authorization', None)
+                    logger.debug(f"🔐 Injected raw auth header for tool: {endpoint_name}")
 
                 try:
                     result = await session.call_tool(endpoint_name, arguments=args)
