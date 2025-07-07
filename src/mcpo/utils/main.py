@@ -1,7 +1,7 @@
 import json
 import traceback
 from typing import Any, Dict, ForwardRef, List, Optional, Type, Union
-
+import logging
 from fastapi import HTTPException, Request
 
 from mcp import ClientSession, types
@@ -26,6 +26,8 @@ MCP_ERROR_TO_HTTP_STATUS = {
     INVALID_PARAMS: 422,
     INTERNAL_ERROR: 500,
 }
+
+logger = logging.getLogger(__name__)
 
 
 async def _tool_requires_openwebui_auth(session, endpoint_name: str, form_data: Any) -> bool:
@@ -76,7 +78,7 @@ def process_tool_response(result: CallToolResult) -> list:
 
 def name_needs_alias(name: str) -> bool:
     """Check if a field name needs aliasing (for now if it starts with '__')."""
-    return name.startswith('__')
+    return name.startswith("__")
 
 
 def generate_alias_name(original_name: str, existing_names: set) -> str:
@@ -90,7 +92,7 @@ def generate_alias_name(original_name: str, existing_names: set) -> str:
     Returns:
         An alias name that doesn't conflict with existing names
     """
-    alias_name = original_name.lstrip('_')
+    alias_name = original_name.lstrip("_")
     # Handle potential naming conflicts
     original_alias_name = alias_name
     suffix_counter = 1
@@ -118,6 +120,19 @@ def _process_schema_property(
     """
     if "$ref" in prop_schema:
         ref = prop_schema["$ref"]
+        if ref.startswith("#/properties/"):
+            # Remove common prefix in pathes.
+            prefix_path = model_name_prefix.split("_form_model_")[-1]
+            ref_path = ref.split("#/properties/")[-1]
+            # Translate $ref path to model_name_prefix style.
+            ref_path = ref_path.replace("/properties/", "_model_")
+            ref_path = ref_path.replace("/items", "_item")
+            # If $ref path is a prefix substring of model_name_prefix path,
+            # there exists a circular reference.
+            # The loop should be broke with a return to avoid exception.
+            if prefix_path.startswith(ref_path):
+                # TODO: Find the exact type hint for the $ref.
+                return Any, Field(default=None, description="")
         ref = ref.split("/")[-1]
         assert ref in schema_defs, "Custom field not found"
         prop_schema = schema_defs[ref]
@@ -183,12 +198,14 @@ def _process_schema_property(
             )
 
             if name_needs_alias(name):
-                other_names = set().union(nested_properties, nested_fields, _model_cache)
+                other_names = set().union(
+                    nested_properties, nested_fields, _model_cache
+                )
                 alias_name = generate_alias_name(name, other_names)
                 aliased_field = Field(
                     default=nested_pydantic_field.default,
                     description=nested_pydantic_field.description,
-                    alias=name
+                    alias=name,
                 )
                 nested_fields[alias_name] = (nested_type_hint, aliased_field)
             else:
@@ -257,7 +274,7 @@ def get_model_fields(form_model_name, properties, required_fields, schema_defs=N
             aliased_field = Field(
                 default=pydantic_field_info.default,
                 description=pydantic_field_info.description,
-                alias=param_name
+                alias=param_name,
             )
             # Use the generated type hint and Field info
             model_fields[alias_name] = (python_type_hint, aliased_field)
@@ -300,7 +317,7 @@ def get_tool_handler(
                         else:
                             args['auth_token'] = auth_header
                             print(f"🔐 Injected raw auth header for tool: {endpoint_name}")
-                    
+
                 try:
                     result = await session.call_tool(endpoint_name, arguments=args)
 
@@ -325,7 +342,7 @@ def get_tool_handler(
                     return final_response
 
                 except McpError as e:
-                    print(
+                    logger.info(
                         f"MCP Error calling {endpoint_name}: {traceback.format_exc()}"
                     )
                     status_code = MCP_ERROR_TO_HTTP_STATUS.get(e.error.code, 500)
@@ -338,7 +355,7 @@ def get_tool_handler(
                         ),
                     )
                 except Exception as e:
-                    print(
+                    logger.info(
                         f"Unexpected error calling {endpoint_name}: {traceback.format_exc()}"
                     )
                     raise HTTPException(
@@ -355,7 +372,7 @@ def get_tool_handler(
             endpoint_name: str, session: ClientSession
         ):  # Parameterless endpoint
             async def tool():  # No parameters
-                print(f"Calling endpoint: {endpoint_name}, with no args")
+                logger.info(f"Calling endpoint: {endpoint_name}, with no args")
                 try:
                     result = await session.call_tool(
                         endpoint_name, arguments={}
@@ -379,7 +396,7 @@ def get_tool_handler(
                     return final_response
 
                 except McpError as e:
-                    print(
+                    logger.info(
                         f"MCP Error calling {endpoint_name}: {traceback.format_exc()}"
                     )
                     status_code = MCP_ERROR_TO_HTTP_STATUS.get(e.error.code, 500)
@@ -393,7 +410,7 @@ def get_tool_handler(
                         ),
                     )
                 except Exception as e:
-                    print(
+                    logger.info(
                         f"Unexpected error calling {endpoint_name}: {traceback.format_exc()}"
                     )
                     raise HTTPException(
