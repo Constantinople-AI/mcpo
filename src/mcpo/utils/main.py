@@ -250,6 +250,9 @@ def get_model_fields(form_model_name, properties, required_fields, schema_defs=N
     _model_cache: Dict[str, Type] = {}
 
     for param_name, param_schema in properties.items():
+        if param_name == 'owui_token':
+            continue
+            
         is_required = param_name in required_fields
         python_type_hint, pydantic_field_info = _process_schema_property(
             _model_cache,
@@ -282,7 +285,13 @@ def get_tool_handler(
     endpoint_name,
     form_model_fields,
     response_model_fields=None,
+    original_input_schema=None,
 ):
+    requires_owui_token = (
+        original_input_schema 
+        and original_input_schema.get("properties", {}).get("owui_token") is not None
+    )
+    
     if form_model_fields:
         FormModel = create_model(f"{endpoint_name}_form_model", **form_model_fields)
         ResponseModel = (
@@ -296,9 +305,12 @@ def get_tool_handler(
         ):  # Parameterized endpoint
             async def tool(form_data: FormModel, request: Request) -> Union[ResponseModel, Any]:
                 args = form_data.model_dump(exclude_none=True, by_alias=True)
-                logger.info(f"Calling endpoint: {endpoint_name}, with args: {args}")
 
                 # Automatically inject auth token for tools that need it
+                if requires_owui_token:
+                    auth_header = request.headers.get('authorization')
+                    if auth_header:
+                        args['owui_token'] = auth_header
                 if await _tool_requires_openwebui_auth(session, endpoint_name, form_data):
                     args['auth_token'] = request.headers.get('authorization', None)
                     logger.debug(f"🔐 Injected raw auth header for tool: {endpoint_name}")
@@ -356,12 +368,21 @@ def get_tool_handler(
         def make_endpoint_func_no_args(
             endpoint_name: str, session: ClientSession
         ):  # Parameterless endpoint
-            async def tool():  # No parameters
+            async def tool(request: Request):  # Add request parameter
                 logger.info(f"Calling endpoint: {endpoint_name}, with no args")
+                args = {}
+                
+                # Auto-inject owui_token if the original schema had it
+                if requires_owui_token:
+                    auth_header = request.headers.get('authorization')
+                    if auth_header:
+                        args['owui_token'] = auth_header
+                if await _tool_requires_openwebui_auth(session, endpoint_name, None):
+                    args['auth_token'] = request.headers.get('authorization', None)
                 try:
                     result = await session.call_tool(
-                        endpoint_name, arguments={}
-                    )  # Empty dict
+                        endpoint_name, arguments=args
+                    )  # Use args instead of empty dict
 
                     if result.isError:
                         error_message = "Unknown tool execution error"

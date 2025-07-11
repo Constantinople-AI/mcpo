@@ -71,6 +71,7 @@ async def create_dynamic_endpoints(app: FastAPI, api_dependency=None):
             endpoint_name,
             form_model_fields,
             response_model_fields,
+            inputSchema,  # Pass original schema for owui_token detection
         )
 
         app.post(
